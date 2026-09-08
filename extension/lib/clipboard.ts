@@ -6,7 +6,10 @@
  * rather than opening a DataChannel.
  *
  * TODO(M10): send/receive clipboard text through the daemon.
- * TODO(M14): hook this up to the page context menu from `entrypoints/content.ts`.
+ * TODO(M14): hook this up to the background contextMenus handler. If page access
+ * is ever needed, request `activeTab` and inject on click - do not add an
+ * `<all_urls>` content script, which triggers the "read all your data on all
+ * websites" install warning.
  */
 
 /** Payloads above this are sent as a file transfer instead of inline text. */
