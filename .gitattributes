@@ -1,0 +1,50 @@
+# Normalize all text files to LF in the repo and on checkout.
+# Silences the Windows "LF will be replaced by CRLF" warning.
+* text=auto eol=lf
+
+# Explicit LF for toolchain-sensitive files
+*.go       text eol=lf
+*.mod      text eol=lf
+*.sum      text eol=lf
+*.sh       text eol=lf
+*.ts       text eol=lf
+*.tsx      text eol=lf
+*.js       text eol=lf
+*.jsx      text eol=lf
+*.json     text eol=lf
+*.yml      text eol=lf
+*.yaml     text eol=lf
+*.md       text eol=lf
+*.html     text eol=lf
+*.css      text eol=lf
+
+# Windows-only scripts keep CRLF
+*.bat      text eol=crlf
+*.cmd      text eol=crlf
+*.ps1      text eol=crlf
+
+# Binaries — never touch
+*.exe      binary
+*.dll      binary
+*.so       binary
+*.dylib    binary
+*.png      binary
+*.jpg      binary
+*.jpeg     binary
+*.gif      binary
+*.webp     binary
+*.ico      binary
+*.svg      text eol=lf
+*.mp4      binary
+*.webm     binary
+*.mov      binary
+*.pdf      binary
+*.zip      binary
+*.xpi      binary
+*.crx      binary
+*.woff     binary
+*.woff2    binary
+
+# Keep generated lockfiles out of diffs
+package-lock.json  -diff linguist-generated=true
+go.sum             -diff linguist-generated=true

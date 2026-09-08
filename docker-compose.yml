@@ -1,0 +1,44 @@
+# ---------------------------------------------------------------------------
+# Nearby Share — PLACEHOLDER for the future signaling service (Milestone 15)
+# ---------------------------------------------------------------------------
+#
+# NOTHING HERE IS BUILT AND NOTHING HERE IS NEEDED.
+#
+# Nearby Share transfers over the LAN. Discovery is mDNS, signaling is relayed
+# between the two local `share-daemon` processes, and the payload moves
+# browser-to-browser over a WebRTC DataChannel. No server is involved and none
+# is required. Do not run `docker compose up` expecting this to do something —
+# there is no image, no source, and no service.
+#
+# This file exists only so that the shape of the optional M15 relay is decided
+# up front instead of being invented later. That relay would be for the one
+# case LAN discovery cannot cover: two devices on genuinely different networks.
+# It would forward WebRTC `signal:offer` / `signal:answer` / `signal:ice`
+# envelopes between daemons and NOTHING ELSE. It would never see, buffer, or
+# store a single byte of a user's text, image, or file.
+#
+# See docs/PLAN.md (M15) and signaling/README.md before uncommenting anything.
+#
+# ---------------------------------------------------------------------------
+#
+# services:
+#   signaling:
+#     # Not implemented. There is no ./signaling source to build yet.
+#     build: ./signaling
+#     container_name: nearby-share-signaling
+#     restart: unless-stopped
+#     ports:
+#       - "8080:8080"          # WebSocket relay endpoint
+#     environment:
+#       - NEARBY_SIGNALING_ADDR=:8080
+#       - NEARBY_PROTOCOL_VERSION=1
+#       - NEARBY_LOG_LEVEL=info
+#       # Rooms are ephemeral and in-memory. No database, no volumes,
+#       # no persistence — a restart forgets everything by design.
+#     healthcheck:
+#       test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8080/health"]
+#       interval: 30s
+#       timeout: 3s
+#       retries: 3
+#
+# No volumes. No database. Persisting anything would defeat the point.
