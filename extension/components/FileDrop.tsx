@@ -61,6 +61,24 @@ export function FileDrop({ onFiles, disabled = false, hint = 'Drop a file to sen
       onDragLeave={() => setOver(false)}
       onDrop={handleDrop}
     >
+      <span className="drop__icon">
+        <svg
+          width="20"
+          height="20"
+          viewBox="0 0 20 20"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="1.4"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          aria-hidden="true"
+          focusable="false"
+        >
+          <path d="M10 13V3.5" />
+          <path d="M6.5 7 10 3.5 13.5 7" />
+          <path d="M3.5 12.5v2.25a1.75 1.75 0 0 0 1.75 1.75h9.5a1.75 1.75 0 0 0 1.75-1.75V12.5" />
+        </svg>
+      </span>
       <p className="drop__hint">{hint}</p>
       <button
         type="button"

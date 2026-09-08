@@ -1,0 +1,697 @@
+/*
+ * Nearby Share — side panel.
+ *
+ * Self-contained: no CDNs, no webfonts. The panel must render identically with
+ * the machine offline, which is the whole point of the product.
+ *
+ * The design language is a warm paper ground, hairline-bordered cards, a serif
+ * display heading against a system sans body, and one rust accent used
+ * sparingly. Every colour is a custom property so the dark block below only has
+ * to redefine values, never rules.
+ */
+
+:root {
+  --bg: #faf9f7;
+  --bg-raised: #ffffff;
+  --bg-sunken: #f0eee9;
+  --border: #e5e1d8;
+  --border-strong: #d6d1c4;
+  --text: #1f1e1c;
+  --text-muted: #6f6b60;
+  --accent: #c96442;
+  --accent-soft: #f7ece7;
+  --online: #3d9a63;
+  --offline: #a8a29a;
+  --danger: #b4462f;
+
+  /*
+   * --accent at 14px on --bg is 3.7:1, which clears AA for UI borders and dots
+   * but not for text. Links and the "Connecting…" label therefore use this
+   * darkened rust (5.2:1) and keep --accent for the things AA does not measure.
+   */
+  --accent-text: #b04a30;
+
+  --radius-card: 12px;
+  --radius-pill: 999px;
+  --gutter: 16px;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #262624;
+    --bg-raised: #30302e;
+    --bg-sunken: #1f1f1e;
+    --border: #3d3d3a;
+    --border-strong: #4d4d49;
+    --text: #f2f0ea;
+    --text-muted: #a8a49a;
+    --accent: #d97757;
+    --accent-soft: #3a2a23;
+    --online: #4ade80;
+    --offline: #78746c;
+    --danger: #f08a72;
+    /* 5.8:1 on --bg; the light-mode rust would be far too dark here. */
+    --accent-text: #e08b6d;
+  }
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  height: 100%;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  /* No fixed width: the side panel owns its width and the user can drag it. */
+  background: var(--bg);
+  color: var(--text);
+  font-family:
+    system-ui,
+    -apple-system,
+    'Segoe UI',
+    Roboto,
+    'Helvetica Neue',
+    Arial,
+    sans-serif;
+  font-size: 14px;
+  line-height: 1.55;
+  -webkit-font-smoothing: antialiased;
+}
+
+#root {
+  height: 100%;
+}
+
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+/* -- shell ---------------------------------------------------------------- */
+
+.app {
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg);
+}
+
+/* Pinned. Everything between it and the footer scrolls. */
+.topbar {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 10px var(--gutter);
+  border-bottom: 1px solid var(--border);
+  background: var(--bg);
+}
+
+.topbar__brand {
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: -0.005em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.scroll {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 22px var(--gutter) 24px;
+  scrollbar-width: thin;
+  scrollbar-color: var(--border-strong) transparent;
+}
+
+.footer {
+  flex: none;
+  padding: 12px var(--gutter) 14px;
+  border-top: 1px solid var(--border);
+  background: var(--bg);
+}
+
+/* -- type ----------------------------------------------------------------- */
+
+/*
+ * The serif display against the sans body is the signature of this design;
+ * ui-serif resolves locally on every target platform, so nothing is fetched.
+ */
+.display {
+  margin: 0 0 8px;
+  font-family: ui-serif, Georgia, 'Times New Roman', serif;
+  font-size: 22px;
+  font-weight: 400;
+  line-height: 1.25;
+  letter-spacing: -0.01em;
+  text-align: center;
+}
+
+.lede {
+  margin: 0 auto 22px;
+  max-width: 34ch;
+  color: var(--text-muted);
+  font-size: 13px;
+  text-align: center;
+  text-wrap: pretty;
+}
+
+.section {
+  margin-bottom: 22px;
+}
+
+.section:last-child {
+  margin-bottom: 0;
+}
+
+.section__label {
+  margin: 0 0 10px;
+  font-size: 11px;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text-muted);
+}
+
+.note {
+  margin: 10px 0 0;
+  color: var(--text-muted);
+  font-size: 11.5px;
+}
+
+.footer__meta {
+  margin: 10px 0 0;
+  color: var(--text-muted);
+  font-size: 11.5px;
+  text-align: center;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.linkbutton {
+  padding: 0;
+  border: 0;
+  border-radius: 3px;
+  background: none;
+  color: var(--accent-text);
+  font: inherit;
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+/* -- status pill ---------------------------------------------------------- */
+
+.pill {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 10px 3px 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-pill);
+  background: var(--bg-raised);
+  color: var(--text-muted);
+  font-size: 11px;
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.pill__dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--offline);
+  flex: none;
+}
+
+/* The dot is decoration only — the label beside it always carries the state. */
+.pill--on {
+  color: var(--text);
+  border-color: color-mix(in srgb, var(--online) 40%, var(--border));
+}
+
+.pill--on .pill__dot {
+  background: var(--online);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--online) 20%, transparent);
+}
+
+.pill--pending {
+  color: var(--accent-text);
+  border-color: color-mix(in srgb, var(--accent) 40%, var(--border));
+}
+
+.pill--pending .pill__dot {
+  background: var(--accent);
+  animation: pulse 1.4s ease-in-out infinite;
+}
+
+.pill--down .pill__dot {
+  background: var(--danger);
+}
+
+.pill--off {
+  background: var(--bg-sunken);
+}
+
+.pill--off .pill__dot {
+  background: var(--offline);
+}
+
+@keyframes pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.35;
+  }
+}
+
+/* -- primary action ------------------------------------------------------- */
+
+/*
+ * Inverting --text/--bg gives the dark pill in light mode and a light pill in
+ * dark mode without a second pair of tokens.
+ */
+.primary {
+  display: block;
+  width: 100%;
+  padding: 11px 16px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-pill);
+  background: var(--text);
+  color: var(--bg);
+  font: inherit;
+  font-size: 14px;
+  font-weight: 500;
+  text-align: center;
+  cursor: pointer;
+  transition: opacity 120ms ease;
+}
+
+.primary:hover {
+  opacity: 0.86;
+}
+
+.primary:active {
+  opacity: 0.76;
+}
+
+/* -- cards ---------------------------------------------------------------- */
+
+.device-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.device {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 11px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-card);
+  background: var(--bg-raised);
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition:
+    border-color 120ms ease,
+    background-color 120ms ease;
+}
+
+.device:hover {
+  border-color: var(--border-strong);
+}
+
+.device--selected {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+
+/* The icon gutter. */
+.device__icon {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 9px;
+  border: 1px solid var(--border);
+  background: var(--bg-sunken);
+  color: var(--text-muted);
+}
+
+.device--selected .device__icon {
+  border-color: color-mix(in srgb, var(--accent) 35%, var(--border));
+  color: var(--accent-text);
+}
+
+.device__text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  flex: 1;
+}
+
+.device__name {
+  font-weight: 550;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.device__meta {
+  color: var(--text-muted);
+  font-size: 11.5px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.device__status {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
+.device__dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--online);
+  flex: none;
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--online) 18%, transparent);
+}
+
+.device__dot--offline {
+  background: var(--offline);
+  box-shadow: none;
+}
+
+/*
+ * Narrow panels tighten the frame rather than dropping anything: the status
+ * dot is never allowed to become the only carrier of "online", so the label
+ * beside it always stays rendered.
+ */
+@media (max-width: 340px) {
+  :root {
+    --gutter: 12px;
+  }
+
+  .device {
+    gap: 10px;
+    padding: 10px;
+  }
+
+  .device__icon {
+    width: 28px;
+    height: 28px;
+  }
+}
+
+/* -- empty state ---------------------------------------------------------- */
+
+.empty {
+  padding: 26px 14px;
+  border: 1px dashed var(--border-strong);
+  border-radius: var(--radius-card);
+  text-align: center;
+  background: var(--bg-sunken);
+}
+
+.empty__title {
+  margin: 0;
+  font-family: ui-serif, Georgia, 'Times New Roman', serif;
+  font-size: 16px;
+}
+
+.empty__hint {
+  margin: 4px 0 0;
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+/* -- file drop ------------------------------------------------------------ */
+
+.drop {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  padding: 20px 14px;
+  border: 1px dashed var(--border-strong);
+  border-radius: var(--radius-card);
+  background: var(--bg-sunken);
+  transition:
+    border-color 120ms ease,
+    background-color 120ms ease;
+}
+
+.drop--over {
+  border-color: var(--accent);
+  border-style: solid;
+  background: var(--accent-soft);
+}
+
+/*
+ * Deliberately not `opacity`: the hint here is the instruction that tells the
+ * user how to un-disable the zone ("Pick a device first"), and fading it would
+ * push it under AA. Only the decorative icon and the disabled button dim.
+ */
+.drop--disabled {
+  border-style: dotted;
+}
+
+.drop--disabled .drop__icon {
+  opacity: 0.5;
+}
+
+.drop__icon {
+  color: var(--text-muted);
+}
+
+.drop--over .drop__icon {
+  color: var(--accent-text);
+}
+
+.drop__hint {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 12px;
+  text-align: center;
+  max-width: 28ch;
+  overflow-wrap: anywhere;
+}
+
+.drop__button {
+  padding: 6px 14px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-pill);
+  background: var(--bg-raised);
+  color: inherit;
+  font: inherit;
+  font-size: 12.5px;
+  cursor: pointer;
+  transition:
+    border-color 120ms ease,
+    color 120ms ease;
+}
+
+.drop__button:hover:not(:disabled) {
+  border-color: var(--accent);
+  color: var(--accent-text);
+}
+
+.drop__button:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.drop__input {
+  display: none;
+}
+
+/* -- transfer progress ---------------------------------------------------- */
+
+.progress {
+  margin-top: 10px;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-card);
+  background: var(--bg-raised);
+}
+
+.progress__head,
+.progress__foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.progress__name {
+  font-weight: 550;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.progress__percent {
+  flex: none;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-muted);
+  font-size: 11.5px;
+}
+
+.progress__track {
+  height: 6px;
+  margin: 9px 0 8px;
+  border-radius: var(--radius-pill);
+  background: var(--bg-sunken);
+  overflow: hidden;
+}
+
+.progress__fill {
+  height: 100%;
+  border-radius: inherit;
+  background: var(--accent);
+  transition: width 160ms linear;
+}
+
+.progress__meta,
+.progress__state {
+  color: var(--text-muted);
+  font-size: 11.5px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.progress__cancel {
+  flex: none;
+  padding: 0;
+  border: 0;
+  border-radius: 3px;
+  background: none;
+  color: var(--danger);
+  font: inherit;
+  font-size: 11.5px;
+  cursor: pointer;
+}
+
+/* -- history -------------------------------------------------------------- */
+
+.history {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.history__row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 10px;
+  border-radius: 9px;
+  background: transparent;
+}
+
+.history__row:hover {
+  background: var(--bg-sunken);
+}
+
+.history__badge {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--offline);
+  flex: none;
+}
+
+.history__badge--ok {
+  background: var(--online);
+}
+
+.history__badge--pending {
+  background: var(--accent);
+}
+
+.history__badge--bad {
+  background: var(--danger);
+}
+
+.history__badge--muted {
+  background: var(--offline);
+}
+
+.history__text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  flex: 1;
+}
+
+.history__name {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.history__meta {
+  color: var(--text-muted);
+  font-size: 11.5px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.history__when {
+  flex: none;
+  color: var(--text-muted);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+
+.history__empty {
+  margin: 0;
+  padding: 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-card);
+  background: var(--bg-raised);
+  color: var(--text-muted);
+  font-size: 12px;
+  text-align: center;
+}

@@ -233,14 +233,25 @@ export interface Envelope {
 }
 
 // ---------------------------------------------------------------------------
-// Popup <-> background runtime messaging
+// Side panel <-> background runtime messaging
 // ---------------------------------------------------------------------------
 
-/** Snapshot of everything the background knows, rendered by the popup. */
+/** Snapshot of everything the background knows, rendered by the side panel. */
 export interface BackgroundState {
+  /** What the socket is actually doing right now. */
   state: ConnectionState;
   info: DaemonInfo | null;
   devices: Device[];
+  /**
+   * The user's explicit connect/disconnect choice, NOT a connection result.
+   *
+   * Persisted by the background under `nearbyShare.enabled` so a Disconnect
+   * survives an MV3 service-worker restart. Deliberately distinct from
+   * `state`: `enabled && state !== 'connected'` means "trying, or the daemon
+   * is not running", while `!enabled` means "the user switched this off" and
+   * must never be presented as a failure.
+   */
+  enabled: boolean;
 }
 
 export interface GetStateRequest {
@@ -251,12 +262,18 @@ export interface ReconnectRequest {
   kind: 'reconnect';
 }
 
-export type RuntimeRequest = GetStateRequest | ReconnectRequest;
+/** Sets the user's connect/disconnect choice; the background persists it. */
+export interface SetEnabledRequest {
+  kind: 'setEnabled';
+  enabled: boolean;
+}
+
+export type RuntimeRequest = GetStateRequest | ReconnectRequest | SetEnabledRequest;
 
 /** Reply to `{kind:'getState'}` — the state snapshot itself. */
 export type GetStateResponse = BackgroundState;
 
-/** Background -> popup push when anything in the snapshot changes. */
+/** Background -> side panel push when anything in the snapshot changes. */
 export interface StateChangedPush extends BackgroundState {
   kind: 'stateChanged';
 }

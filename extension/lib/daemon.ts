@@ -2,9 +2,9 @@
  * DaemonClient — owns the connection to the local Nearby Share daemon.
  *
  * The daemon listens on loopback only (http://127.0.0.1:8765). This client is
- * instantiated by the BACKGROUND script, never by the popup: the popup is torn
- * down whenever it closes, so a popup-owned socket would reconnect on every
- * open. See `entrypoints/background.ts`.
+ * instantiated by the BACKGROUND script, never by the side panel: the panel is
+ * torn down whenever it closes, so a panel-owned socket would reconnect on
+ * every open. See `entrypoints/background.ts`.
  *
  * Everything here is defensive: with no daemon running (the normal case in
  * Milestone 1) nothing throws and nothing rejects unhandled — the client simply

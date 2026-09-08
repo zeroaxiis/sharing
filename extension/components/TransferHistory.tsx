@@ -2,7 +2,7 @@ import { formatBytes, type TransferRecord } from '@/lib/transfer';
 
 export interface TransferHistoryProps {
   transfers: readonly TransferRecord[];
-  /** Cap on rows rendered; the popup is small. */
+  /** Cap on rows rendered; the side panel is narrow. */
   limit?: number;
 }
 

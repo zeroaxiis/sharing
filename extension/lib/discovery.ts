@@ -4,10 +4,10 @@
  * Discovery itself is the daemon's job — it runs mDNS (`_nearby-share._tcp`,
  * domain `local.`) because a browser extension cannot speak multicast DNS.
  * This module is the extension-side view of that: it subscribes to the
- * daemon's `devices` push and keeps a cached roster for the popup.
+ * daemon's `devices` push and keeps a cached roster for the side panel.
  *
  * TODO(M4): daemon-side mDNS advertise/browse via libp2p/zeroconf.
- * TODO(M5): subscribe to the `devices` push here and drive the popup list.
+ * TODO(M5): subscribe to the `devices` push here and drive the side panel list.
  */
 
 import type { DaemonClient } from '@/lib/daemon';
@@ -17,7 +17,7 @@ import type { Device } from '@/types';
 export type DevicesListener = (devices: Device[]) => void;
 
 /**
- * Devices shown in the popup while no daemon is reachable, so the UI is
+ * Devices shown in the side panel while no daemon is reachable, so the UI is
  * inspectable during Milestone 1. Never merged with real discovery results.
  */
 export const FAKE_DEVICES: Device[] = [

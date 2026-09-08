@@ -4,7 +4,7 @@ import App from './App';
 import './App.css';
 
 const container = document.getElementById('root');
-if (!container) throw new Error('popup root element is missing');
+if (!container) throw new Error('side panel root element is missing');
 
 ReactDOM.createRoot(container).render(
   <React.StrictMode>
