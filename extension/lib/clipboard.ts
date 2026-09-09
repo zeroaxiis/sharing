@@ -1,27 +1,25 @@
 /**
- * Clipboard and text sharing.
+ * Clipboard helpers for the side panel.
  *
- * The daemon advertises the "text" capability in DaemonInfo.capabilities, so
- * short payloads (selected text, a link, a snippet) go over the control socket
- * rather than opening a DataChannel.
+ * Sending text is NOT here any more. In protocol v2 text travels on the peer
+ * DataChannel like everything else (`{"type":"text"}`, spec §6) — the daemon
+ * relays signalling and never sees a payload — so `TransferEngine.sendText()`
+ * owns that path and this module is left with the two things that genuinely
+ * belong to the clipboard.
  *
- * TODO(M10): send/receive clipboard text through the daemon.
- * TODO(M14): hook this up to the background contextMenus handler. If page access
- * is ever needed, request `activeTab` and inject on click - do not add an
+ * TODO(M14): a contextMenus handler for "send selection to…". If page access is
+ * ever needed, request `activeTab` and inject on click — do NOT add an
  * `<all_urls>` content script, which triggers the "read all your data on all
  * websites" install warning.
  */
 
-/** Payloads above this are sent as a file transfer instead of inline text. */
-export const MAX_INLINE_TEXT_BYTES = 64 * 1024;
+import { MAX_INLINE_TEXT } from '@/types';
 
-export interface TextPayload {
-  /** Device id of the destination. */
-  peerId: string;
-  text: string;
-  /** Where the text came from, for the receiver's notification. */
-  source: 'selection' | 'clipboard' | 'link' | 'manual';
-}
+/**
+ * Payloads at or under this are sent as one inline `text` frame; anything
+ * larger becomes a file transfer, with consent and backpressure.
+ */
+export const MAX_INLINE_TEXT_BYTES = MAX_INLINE_TEXT;
 
 /**
  * Reads the current clipboard text.
@@ -51,17 +49,7 @@ export async function writeClipboardText(text: string): Promise<boolean> {
   }
 }
 
-/** True when the payload is small enough to travel inline over the socket. */
+/** True when the payload is small enough to travel as one inline frame. */
 export function fitsInline(text: string): boolean {
-  return new TextEncoder().encode(text).byteLength <= MAX_INLINE_TEXT_BYTES;
-}
-
-/**
- * Sends text to a paired device.
- *
- * TODO(M10): implement on top of the daemon socket.
- */
-export async function sendText(payload: TextPayload): Promise<boolean> {
-  console.warn('[nearby-share] sendText is a stub (M10):', payload.peerId, payload.source);
-  return false;
+  return new TextEncoder().encode(text).byteLength < MAX_INLINE_TEXT_BYTES;
 }

@@ -1,25 +1,26 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useMemo } from 'react';
 import { DeviceList } from '@/components/DeviceList';
 import { FileDrop } from '@/components/FileDrop';
+import { IncomingTransferDialog } from '@/components/IncomingTransferDialog';
+import { PairingDialog } from '@/components/PairingDialog';
+import { ReceivedList } from '@/components/ReceivedList';
+import { TextComposer } from '@/components/TextComposer';
 import { TransferHistory } from '@/components/TransferHistory';
 import { TransferProgress } from '@/components/TransferProgress';
-import { FAKE_DEVICES } from '@/lib/discovery';
+import { describePhase } from '@/lib/session';
 import type { TransferRecord } from '@/lib/transfer';
-import type { BackgroundState, Device, ReconnectRequest, SetEnabledRequest } from '@/types';
-
-/** `enabled` starts true here for the same reason it does in the background. */
-const INITIAL_STATE: BackgroundState = {
-  state: 'idle',
-  info: null,
-  devices: [],
-  enabled: true,
-};
+import type { BackgroundState } from '@/types';
+import { useSharing } from './useSharing';
 
 /**
- * Three-way status, because "not connected" has two very different causes.
+ * Four-way status, because "not connected" has four very different causes and
+ * showing one word for all of them is how a user ends up restarting a daemon
+ * that was never the problem.
  *
- * `off` is the user's own doing and must never be dressed up as a failure;
- * `down` means we are trying and the daemon is not answering.
+ * `off`     the user's own doing; never dressed up as a failure
+ * `pending` first attempt, still in flight
+ * `down`    we tried and nothing answered
+ * `on`      usable
  */
 type StatusTone = 'on' | 'pending' | 'down' | 'off';
 
@@ -30,118 +31,78 @@ interface Status {
 
 function describeStatus(snapshot: BackgroundState): Status {
   if (!snapshot.enabled) return { label: 'Off', tone: 'off' };
+  if (snapshot.problem) return { label: 'Incompatible', tone: 'down' };
 
   switch (snapshot.state) {
     case 'connected':
       return { label: 'Connected', tone: 'on' };
     case 'connecting':
-    // `reconnecting` is the backoff loop between attempts — still trying, so it
-    // reads the same way to the user.
-    case 'reconnecting':
       return { label: 'Connecting…', tone: 'pending' };
+    // `reconnecting` means at least one attempt has already failed, which is a
+    // different thing to say than "connecting".
+    case 'reconnecting':
+      return { label: 'Retrying…', tone: 'down' };
+    case 'error':
+      return { label: 'Problem', tone: 'down' };
     default:
       return { label: 'Disconnected', tone: 'down' };
   }
 }
 
-/**
- * Narrows an untyped runtime message. `browser.runtime` hands back `any`, so
- * every crossing into our types goes through here. `enabled` is checked too: a
- * reply without it cannot be trusted to describe the connect/disconnect toggle.
- */
-function isBackgroundState(value: unknown): value is BackgroundState {
-  if (typeof value !== 'object' || value === null) return false;
-  const candidate = value as Partial<BackgroundState>;
-  return (
-    typeof candidate.state === 'string' &&
-    typeof candidate.enabled === 'boolean' &&
-    Array.isArray(candidate.devices)
-  );
+/** A single, non-repeating sentence for the aria-live transfer region. */
+function liveSummary(active: TransferRecord[], history: TransferRecord[]): string {
+  const first = active[0];
+  if (first) {
+    return active.length === 1
+      ? (first.direction === 'send' ? 'Sending ' : 'Receiving ') + first.name + '.'
+      : String(active.length) + ' transfers in progress.';
+  }
+  const last = history[0];
+  if (!last) return '';
+  switch (last.status) {
+    case 'complete':
+      return last.direction === 'send'
+        ? 'Sent ' + last.name + ' to ' + last.peerName + '.'
+        : 'Received ' + last.name + ' from ' + last.peerName + '.';
+    case 'cancelled':
+      return last.name + ' was cancelled.';
+    case 'failed':
+      return last.name + ' failed. ' + (last.error ?? '');
+    default:
+      return '';
+  }
 }
 
 export function App() {
-  const [snapshot, setSnapshot] = useState<BackgroundState>(INITIAL_STATE);
-  const [selectedId, setSelectedId] = useState<string | null>(null);
-
-  // M9 fills these; the components below are already wired to their shapes.
-  const [active] = useState<TransferRecord[]>([]);
-  const [history] = useState<TransferRecord[]>([]);
-
-  // The background owns the socket, so the panel pulls a snapshot on mount and
-  // then rides the stateChanged pushes for as long as it stays open.
-  useEffect(() => {
-    let cancelled = false;
-
-    void browser.runtime
-      .sendMessage({ kind: 'getState' })
-      .then((reply: unknown) => {
-        if (!cancelled && isBackgroundState(reply)) setSnapshot(reply);
-      })
-      .catch(() => {
-        // Service worker still waking up; the push below will catch us up.
-      });
-
-    const onPush = (message: unknown) => {
-      if (isBackgroundState(message)) setSnapshot(message);
-    };
-
-    browser.runtime.onMessage.addListener(onPush);
-    return () => {
-      cancelled = true;
-      browser.runtime.onMessage.removeListener(onPush);
-    };
-  }, []);
-
-  const retry = useCallback(() => {
-    const request: ReconnectRequest = { kind: 'reconnect' };
-    void browser.runtime.sendMessage(request).catch(() => undefined);
-  }, []);
-
-  const setEnabled = useCallback((next: boolean) => {
-    // Optimistic, so the button feels immediate. Turning off drops everything
-    // the socket taught us, which is exactly what the background is about to
-    // do; turning on shows "Connecting…" until the socket says otherwise.
-    setSnapshot((prev) =>
-      next
-        ? { ...prev, enabled: true, state: prev.state === 'connected' ? 'connected' : 'connecting' }
-        : { state: 'idle', info: null, devices: [], enabled: false },
-    );
-
-    const request: SetEnabledRequest = { kind: 'setEnabled', enabled: next };
-    void browser.runtime
-      .sendMessage(request)
-      .then((reply: unknown) => {
-        if (!isBackgroundState(reply)) return;
-        // Only `enabled` is taken from the reply. The background answers before
-        // it has finished tearing the socket down, so the rest of that snapshot
-        // can still describe the old connection; the stateChanged push that
-        // follows carries the truth.
-        const confirmed = reply.enabled;
-        setSnapshot((prev) => ({ ...prev, enabled: confirmed }));
-      })
-      .catch(() => undefined);
-  }, []);
+  const share = useSharing();
+  const {
+    snapshot,
+    devices,
+    usingPlaceholders,
+    peerStates,
+    busyId,
+    pairing,
+    session,
+    keepOpen,
+    active,
+    history,
+    incoming,
+    received,
+    notice,
+  } = share;
 
   const enabled = snapshot.enabled;
   const connected = snapshot.state === 'connected';
   const status = describeStatus(snapshot);
+  const anyPaired = devices.some((device) => device.paired);
+  const canSend = session !== null && session.phase === 'connected';
 
-  // Milestone 1: with no daemon running we deliberately show the mock roster so
-  // the UI is inspectable. Real devices only ever come from the daemon.
-  const devices: Device[] = connected ? snapshot.devices : FAKE_DEVICES;
-  const usingFakes = !connected;
-
-  const selected = devices.find((device) => device.id === selectedId) ?? null;
-
-  const onFiles = useCallback((files: File[]) => {
-    // TODO(M9): hand these to lib/transfer.ts startTransfer().
-    console.info('[nearby-share] files selected (not yet sent):', files.map((f) => f.name));
-  }, []);
+  const live = useMemo(() => liveSummary(active, history), [active, history]);
 
   return (
     <div className="app">
       <header className="topbar">
-        <span className="topbar__brand">Nearby Share</span>
+        <span className="topbar__brand">Sharing</span>
         <span className={'pill pill--' + status.tone} aria-live="polite">
           <span className="pill__dot" aria-hidden="true" />
           {status.label}
@@ -153,15 +114,28 @@ export function App() {
 
         <p className="lede">
           {!enabled ? (
-            <>Nearby Share is off. Nothing is being discovered, and nothing can be sent.</>
+            <>Sharing is off. Nothing is being discovered, and nothing can be sent.</>
+          ) : snapshot.problem ? (
+            <>
+              {snapshot.problem.message}{' '}
+              <button type="button" className="linkbutton" onClick={share.retryDaemon}>
+                Try again
+              </button>
+            </>
           ) : connected ? (
-            <>Pick a device on your network, then drop in whatever you want to send.</>
-          ) : status.tone === 'pending' ? (
-            <>Looking for the Nearby Share daemon on this computer…</>
+            devices.length === 0 ? (
+              <>No other devices have appeared on your network yet.</>
+            ) : anyPaired ? (
+              <>Pick a paired device, then send text or drop in a file.</>
+            ) : (
+              <>Pair a device once. After that, sending to it is one click.</>
+            )
+          ) : snapshot.state === 'connecting' ? (
+            <>Looking for the Sharing daemon on this computer…</>
           ) : (
             <>
               The daemon is not answering on 127.0.0.1:8765. Start it, then{' '}
-              <button type="button" className="linkbutton" onClick={retry}>
+              <button type="button" className="linkbutton" onClick={share.retryDaemon}>
                 Retry
               </button>
               .
@@ -169,43 +143,148 @@ export function App() {
           )}
         </p>
 
+        {notice ? (
+          <div
+            className={'banner banner--' + notice.tone}
+            role={notice.tone === 'error' ? 'alert' : 'status'}
+          >
+            <span className="banner__text">{notice.text}</span>
+            <button
+              type="button"
+              className="linkbutton linkbutton--quiet"
+              onClick={share.dismissNotice}
+            >
+              Dismiss
+            </button>
+          </div>
+        ) : null}
+
         <section className="section">
-          <h2 className="section__label">Nearby devices</h2>
+          <div className="section__head">
+            <h2 className="section__label">Nearby devices</h2>
+            {connected ? (
+              <button type="button" className="linkbutton" onClick={share.refreshDevices}>
+                Refresh
+              </button>
+            ) : null}
+          </div>
+
           <DeviceList
             devices={devices}
-            selectedId={selectedId}
-            onSelect={(device) => setSelectedId(device.id === selectedId ? null : device.id)}
+            selectedId={session?.peerId ?? null}
+            peerStates={peerStates}
+            busyId={busyId}
+            disabled={!enabled || usingPlaceholders}
+            onPair={share.startPair}
+            onSend={share.connectTo}
+            onForget={share.forgetPair}
+            emptyTitle={connected ? 'Nothing found yet' : 'No devices'}
+            emptyHint={
+              connected
+                ? 'Other devices need Sharing running on the same network.'
+                : 'Start the daemon to discover devices.'
+            }
           />
-          {usingFakes ? (
+
+          {usingPlaceholders ? (
             <p className="note">
               {enabled
-                ? 'Showing example devices until the daemon connects.'
-                : 'Showing example devices. Nearby Share is off.'}
+                ? 'Showing example devices until the daemon connects. Nothing can be sent to them.'
+                : 'Showing example devices. Sharing is off.'}
             </p>
           ) : null}
         </section>
 
-        <section className="section">
-          <h2 className="section__label">Send</h2>
-          <FileDrop
-            onFiles={onFiles}
-            disabled={!enabled || !selected}
-            hint={
-              !enabled
-                ? 'Turn Nearby Share on to send'
-                : selected
-                  ? 'Drop a file for ' + selected.name
-                  : 'Pick a device first'
-            }
-          />
-          {active.map((transfer) => (
-            <TransferProgress key={transfer.transferId} transfer={transfer} />
-          ))}
-        </section>
+        {session ? (
+          <section className="section">
+            <div className="section__head">
+              <h2 className="section__label">
+                {session.phase === 'connected' ? 'Send to ' + session.peerName : 'Connection'}
+              </h2>
+              <button type="button" className="linkbutton" onClick={share.disconnect}>
+                Disconnect
+              </button>
+            </div>
+
+            <p
+              className={
+                'banner banner--' +
+                (session.phase === 'failed' ? 'error' : session.phase === 'connected' ? 'ok' : 'info')
+              }
+              role="status"
+            >
+              <span className="banner__text">{describePhase(session)}</span>
+            </p>
+
+            {session.phase === 'failed' ? (
+              <p className="note">
+                Nothing was sent. Both machines must be on the same network, and that network must
+                be set to Private rather than Public.
+              </p>
+            ) : null}
+
+            <TextComposer
+              onSend={share.sendText}
+              disabled={!canSend}
+              peerName={session.peerName}
+            />
+
+            <FileDrop
+              onFiles={share.sendFiles}
+              disabled={!canSend}
+              hint={
+                canSend
+                  ? 'Drop a file for ' + session.peerName
+                  : 'Waiting for the connection to ' + session.peerName
+              }
+            />
+
+            {/*
+              Progress bars carry aria-valuenow, which assistive tech reads on
+              demand. This line is the part that gets announced, and it only
+              changes when a transfer starts or ends — a per-chunk live region
+              would be unusable.
+            */}
+            <p className="live" role="status" aria-live="polite">
+              {live}
+            </p>
+
+            {active.map((transfer) => (
+              <TransferProgress
+                key={transfer.transferId}
+                transfer={transfer}
+                onCancel={share.cancelTransfer}
+              />
+            ))}
+
+            {keepOpen ? (
+              <p className="keepopen">
+                <strong>Keep this panel open while transferring.</strong> The connection lives in
+                this panel, so closing it cancels anything in flight.
+              </p>
+            ) : null}
+          </section>
+        ) : null}
+
+        {received.length > 0 ? (
+          <section className="section">
+            <h2 className="section__label">Received</h2>
+            <ReceivedList items={received} onDismiss={share.dismissReceived} />
+            <p className="note">
+              Saved files leave this list. Anything still here is held in the panel and is lost when
+              the panel closes.
+            </p>
+          </section>
+        ) : null}
 
         <section className="section">
           <h2 className="section__label">Recent</h2>
           <TransferHistory transfers={history} />
+          {history.some((record) => record.status === 'failed' && record.error) ? (
+            <p className="note note--bad">
+              {history.find((record) => record.status === 'failed' && record.error)?.error}
+            </p>
+          ) : null}
         </section>
       </main>
 
@@ -216,7 +295,7 @@ export function App() {
           // The toggle governs one thing — the connection — so its pressed state
           // tracks `enabled` while its label names what a click will do.
           aria-pressed={enabled}
-          onClick={() => setEnabled(!enabled)}
+          onClick={() => share.setEnabled(!enabled)}
         >
           {enabled ? 'Disconnect' : 'Connect'}
         </button>
@@ -229,6 +308,18 @@ export function App() {
               : 'Reconnects only when you ask it to.'}
         </p>
       </footer>
+
+      {pairing ? (
+        <PairingDialog
+          pairing={pairing}
+          onAnswer={share.answerPairing}
+          onClose={share.closePairing}
+        />
+      ) : null}
+
+      {incoming ? (
+        <IncomingTransferDialog offer={incoming} onAnswer={share.answerIncoming} />
+      ) : null}
     </div>
   );
 }

@@ -1,5 +1,5 @@
 /**
- * DaemonClient — owns the connection to the local Nearby Share daemon.
+ * DaemonClient — owns the connection to the local Sharing daemon.
  *
  * The daemon listens on loopback only (http://127.0.0.1:8765). This client is
  * instantiated by the BACKGROUND script, never by the side panel: the panel is
@@ -14,11 +14,13 @@
 import {
   APP_VERSION,
   DAEMON_HTTP_ORIGIN,
+  DAEMON_PORT,
   DAEMON_WS_URL,
   PROTOCOL_VERSION,
   type ClientMessage,
   type ConnectionState,
   type DaemonInfo,
+  type DaemonProblem,
   type Envelope,
   type Platform,
   type ServerMessage,
@@ -48,6 +50,13 @@ export interface DaemonClientOptions {
   onStateChange?: (state: ConnectionState) => void;
   /** Called whenever a fresh DaemonInfo is learned (via `ready` or /info). */
   onInfo?: (info: DaemonInfo | null) => void;
+  /**
+   * Called when the daemon is reachable but unusable, and again with null once
+   * it becomes usable. `state === 'reconnecting'` alone cannot distinguish "no
+   * daemon" from "wrong protocol version", and telling a user to start a daemon
+   * that is already running is the kind of wrong that costs an hour.
+   */
+  onProblem?: (problem: DaemonProblem | null) => void;
 }
 
 type MessageHandler<T extends ServerMessageType> = (message: ServerMessageOf<T>) => void;
@@ -66,10 +75,12 @@ export class DaemonClient {
   private socket: WebSocket | null = null;
   private state: ConnectionState = 'idle';
   private info: DaemonInfo | null = null;
+  private problem: DaemonProblem | null = null;
 
   private readonly handlers = new Map<ServerMessageType, Set<ErasedHandler>>();
   private readonly stateListeners = new Set<(state: ConnectionState) => void>();
   private readonly infoListeners = new Set<(info: DaemonInfo | null) => void>();
+  private readonly problemListeners = new Set<(problem: DaemonProblem | null) => void>();
 
   private attempt = 0;
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
@@ -84,6 +95,7 @@ export class DaemonClient {
     this.wsUrl = options.wsUrl ?? DAEMON_WS_URL;
     if (options.onStateChange) this.stateListeners.add(options.onStateChange);
     if (options.onInfo) this.infoListeners.add(options.onInfo);
+    if (options.onProblem) this.problemListeners.add(options.onProblem);
   }
 
   // -- public surface -------------------------------------------------------
@@ -94,6 +106,10 @@ export class DaemonClient {
 
   getInfo(): DaemonInfo | null {
     return this.info;
+  }
+
+  getProblem(): DaemonProblem | null {
+    return this.problem;
   }
 
   isConnected(): boolean {
@@ -179,6 +195,8 @@ export class DaemonClient {
   /** Tears everything down and stops reconnecting. */
   close(): void {
     this.closed = true;
+    // The user asked for this, so there is no problem left to report.
+    this.setProblem(null);
     this.clearReconnectTimer();
     this.clearHelloTimer();
     this.stopPing();
@@ -238,6 +256,13 @@ export class DaemonClient {
     };
   }
 
+  onProblem(listener: (problem: DaemonProblem | null) => void): () => void {
+    this.problemListeners.add(listener);
+    return () => {
+      this.problemListeners.delete(listener);
+    };
+  }
+
   // -- internals ------------------------------------------------------------
 
   private sendHello(): void {
@@ -255,6 +280,13 @@ export class DaemonClient {
     this.helloTimer = setTimeout(() => {
       this.helloTimer = null;
       if (this.state !== 'connected') {
+        this.setProblem({
+          code: 'hello_timeout',
+          message:
+            'Something is listening on 127.0.0.1:' +
+            String(DAEMON_PORT) +
+            ' but it did not answer the Sharing handshake.',
+        });
         this.setState('error');
         this.dropSocketAndRetry('hello timeout');
       }
@@ -282,15 +314,26 @@ export class DaemonClient {
       this.clearHelloTimer();
       if (ready.protocolVersion !== PROTOCOL_VERSION) {
         console.warn(
-          '[nearby-share] protocol mismatch: daemon speaks',
+          '[sharing] protocol mismatch: daemon speaks',
           ready.protocolVersion,
           'expected',
           PROTOCOL_VERSION,
         );
+        this.setProblem({
+          code: 'protocol_mismatch',
+          message:
+            'The daemon speaks protocol v' +
+            String(ready.protocolVersion) +
+            '; this extension needs v' +
+            String(PROTOCOL_VERSION) +
+            '. Update the daemon.',
+          daemonProtocolVersion: ready.protocolVersion,
+        });
         this.setState('error');
         this.dropSocketAndRetry('protocol mismatch');
         return;
       }
+      this.setProblem(null);
       this.setInfo({
         id: ready.device.id,
         name: ready.device.name,
@@ -313,7 +356,7 @@ export class DaemonClient {
       try {
         handler(message);
       } catch (error) {
-        console.error('[nearby-share] message handler threw', error);
+        console.error('[sharing] message handler threw', error);
       }
     }
   }
@@ -389,7 +432,20 @@ export class DaemonClient {
       try {
         listener(next);
       } catch (error) {
-        console.error('[nearby-share] state listener threw', error);
+        console.error('[sharing] state listener threw', error);
+      }
+    }
+  }
+
+  private setProblem(next: DaemonProblem | null): void {
+    if (this.problem === null && next === null) return;
+    if (this.problem?.code === next?.code && this.problem?.message === next?.message) return;
+    this.problem = next;
+    for (const listener of this.problemListeners) {
+      try {
+        listener(next);
+      } catch (error) {
+        console.error('[sharing] problem listener threw', error);
       }
     }
   }
@@ -400,7 +456,7 @@ export class DaemonClient {
       try {
         listener(next);
       } catch (error) {
-        console.error('[nearby-share] info listener threw', error);
+        console.error('[sharing] info listener threw', error);
       }
     }
   }

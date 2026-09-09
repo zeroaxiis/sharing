@@ -1,9 +1,9 @@
 {
-  "name": "nearby-share-extension",
+  "name": "sharing-extension",
   "private": true,
   "version": "0.1.0",
   "type": "module",
-  "description": "Nearby Share browser extension — send text, links and files between your own devices over the local network.",
+  "description": "Sharing browser extension — send text, links and files between your own devices over the local network.",
   "scripts": {
     "dev": "wxt",
     "dev:firefox": "wxt dev -b firefox",
@@ -12,6 +12,7 @@
     "zip": "wxt zip",
     "zip:firefox": "wxt zip -b firefox",
     "compile": "tsc --noEmit",
+    "test": "node tests/run.mjs",
     "postinstall": "wxt prepare"
   },
   "dependencies": {

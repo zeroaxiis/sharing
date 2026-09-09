@@ -12,7 +12,7 @@ export default defineConfig({
   manifestVersion: 3,
 
   manifest: ({ browser }) => ({
-    name: 'Nearby Share',
+    name: 'Sharing',
     description:
       'Send text, links and files between your own devices over the local network. No cloud, no account.',
     version: '0.1.0',
@@ -30,7 +30,7 @@ export default defineConfig({
     // for us. Declaring it here keeps the toolbar icon: on Chrome clicking it
     // opens the side panel (see setPanelBehavior in entrypoints/background.ts),
     // and on Firefox the sidebar has its own toolbar button.
-    action: { default_title: 'Nearby Share' },
+    action: { default_title: 'Sharing' },
 
     // Gecko-only key. Chrome logs "Unrecognized manifest key" when it is
     // present, so it is emitted for the Firefox target only.
@@ -38,7 +38,7 @@ export default defineConfig({
       ? {
           browser_specific_settings: {
             gecko: {
-              id: 'nearby-share@zeroaxiis.dev',
+              id: 'sharing@zeroaxiis.dev',
               strict_min_version: '109.0',
               // Required by AMO for new extensions since 2025-11-03. Nothing
               // leaves the local network, so nothing is collected.
