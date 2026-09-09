@@ -1,4 +1,4 @@
-# NEARBY SHARE — AUTHORITATIVE PROTOCOL SPEC v1
+# SHARING — AUTHORITATIVE PROTOCOL SPEC v1
 
 This is the single source of truth. The TypeScript and Go implementations MUST match field-for-field.
 All JSON field names are camelCase. Do not rename, do not add fields not listed, do not change casing.
@@ -9,7 +9,7 @@ All JSON field names are camelCase. Do not rename, do not add fields not listed,
 - `APP_VERSION = "0.1.0"`
 - Default daemon bind: `127.0.0.1:8765`  (loopback ONLY — never `0.0.0.0`)
 - WebSocket path: `/ws`        -> `ws://127.0.0.1:8765/ws`
-- mDNS service type: `"_nearby-share._tcp"`   domain `"local."`
+- mDNS service type: `"_sharing._tcp"`   domain `"local."`
 - mDNS TXT keys: `id`, `name`, `ver`, `proto`
 - `CHUNK_SIZE = 65536`  (64 KiB)
 
@@ -130,7 +130,7 @@ re-unmarshal the raw bytes into the concrete type.
 ## Device identity
 
 - `deviceId`: RFC 4122 v4 UUID, generated once, persisted.
-- Config file: `os.UserConfigDir()/nearby-share/config.json`, mode `0600`, dir `0700`.
+- Config file: `os.UserConfigDir()/sharing/config.json`, mode `0600`, dir `0700`.
 
 ```json
 {"deviceId":"8f3a...","name":"Aashish's Laptop","createdAt":"2026-09-09T01:00:00Z"}

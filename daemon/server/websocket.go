@@ -13,6 +13,7 @@ import (
 	"github.com/coder/websocket"
 	"github.com/google/uuid"
 
+	"github.com/zeroaxiis/sharing/daemon/peer"
 	"github.com/zeroaxiis/sharing/daemon/protocol"
 )
 
@@ -22,7 +23,7 @@ const (
 	sendBuffer = 32
 	// readLimit caps a single inbound frame. Control messages are tiny; bulk
 	// payloads travel over WebRTC, never over this socket.
-	readLimit = 1 << 20 // 1 MiB
+	readLimit = protocol.MaxFrameBytes
 	// writeTimeout bounds a single outbound frame write.
 	writeTimeout = 10 * time.Second
 	// keepaliveInterval is how often the daemon pings an idle client so that a
@@ -264,6 +265,74 @@ func (s *Server) dispatch(c *client, data []byte) {
 		}
 		c.enqueue(protocol.NewPong(env.ID, msg.T))
 
+	case protocol.TypeDevicesRefresh:
+		// Age the roster first, so a refresh after a peer disappeared reports
+		// the truth rather than the last cached sighting. The answer goes to
+		// the asking client only; the debounced push serves everyone else.
+		s.SweepDevices()
+		c.enqueue(protocol.NewDevices(s.Devices()))
+
+	case protocol.TypePairStart:
+		var msg protocol.PairStartMessage
+		if err := json.Unmarshal(data, &msg); err != nil {
+			c.enqueue(protocol.NewError(env.ID, protocol.ErrCodeBadJSON, "malformed pair:start message"))
+			return
+		}
+		s.handlePairStart(c, env.ID, msg)
+
+	case protocol.TypePairConfirm:
+		var msg protocol.PairConfirmMessage
+		if err := json.Unmarshal(data, &msg); err != nil {
+			c.enqueue(protocol.NewError(env.ID, protocol.ErrCodeBadJSON, "malformed pair:confirm message"))
+			return
+		}
+		s.handlePairConfirm(c, env.ID, msg)
+
+	case protocol.TypePairForget:
+		var msg protocol.PairForgetMessage
+		if err := json.Unmarshal(data, &msg); err != nil {
+			c.enqueue(protocol.NewError(env.ID, protocol.ErrCodeBadJSON, "malformed pair:forget message"))
+			return
+		}
+		s.handlePairForget(c, env.ID, msg)
+
+	case protocol.TypeSignalOffer:
+		var msg protocol.SignalOfferRequest
+		if err := json.Unmarshal(data, &msg); err != nil {
+			c.enqueue(protocol.NewError(env.ID, protocol.ErrCodeBadJSON, "malformed signal:offer message"))
+			return
+		}
+		if err := msg.Validate(); err != nil {
+			c.enqueue(protocol.NewError(env.ID, protocol.ErrCodeInvalidRequest, err.Error()))
+			return
+		}
+		s.relaySignal(c, env.ID, msg.To, protocol.NewPeerSignalOffer(s.cfg.DeviceID, msg.SDP))
+
+	case protocol.TypeSignalAnswer:
+		var msg protocol.SignalAnswerRequest
+		if err := json.Unmarshal(data, &msg); err != nil {
+			c.enqueue(protocol.NewError(env.ID, protocol.ErrCodeBadJSON, "malformed signal:answer message"))
+			return
+		}
+		if err := msg.Validate(); err != nil {
+			c.enqueue(protocol.NewError(env.ID, protocol.ErrCodeInvalidRequest, err.Error()))
+			return
+		}
+		s.relaySignal(c, env.ID, msg.To, protocol.NewPeerSignalAnswer(s.cfg.DeviceID, msg.SDP))
+
+	case protocol.TypeSignalICE:
+		var msg protocol.SignalICERequest
+		if err := json.Unmarshal(data, &msg); err != nil {
+			c.enqueue(protocol.NewError(env.ID, protocol.ErrCodeBadJSON, "malformed signal:ice message"))
+			return
+		}
+		if err := msg.Validate(); err != nil {
+			c.enqueue(protocol.NewError(env.ID, protocol.ErrCodeInvalidRequest, err.Error()))
+			return
+		}
+		s.relaySignal(c, env.ID, msg.To,
+			protocol.NewPeerSignalICE(s.cfg.DeviceID, msg.Candidate, msg.SDPMid, msg.SDPMLineIndex))
+
 	default:
 		c.log.Debug("unsupported message type", "clientId", c.id, "type", env.Type)
 		c.enqueue(protocol.NewError(env.ID, protocol.ErrCodeUnknownType,
@@ -271,13 +340,237 @@ func (s *Server) dispatch(c *client, data []byte) {
 	}
 }
 
-// Broadcast queues a message for every connected client.
-//
-// TODO(M5): used by discovery to push the `devices` snapshot.
+// Broadcast queues a message for every connected client. Safe to call from any
+// goroutine, including the peer layer callbacks below.
 func (s *Server) Broadcast(msg any) {
 	for _, c := range s.hub.snapshot() {
 		c.enqueue(msg)
 	}
+}
+
+// -----------------------------------------------------------------------------
+// Control plane -> peer layer: what the extension asked this daemon to do
+// -----------------------------------------------------------------------------
+
+// peerContext is the context handed to the peer layer for work that outlives
+// the frame that started it.
+//
+// It is deliberately not derived from the client connection, and carries no
+// deadline of its own. A pairing waits up to two minutes for two humans to
+// press a button, and relaying an offer may open a socket that has to stay up
+// for the answer and the ICE candidates that follow. Scoping either to the
+// request would cancel a pairing the moment the popup closed and tear down a
+// peer connection as soon as the first frame was delivered. The peer layer
+// applies its own dial, handshake and pairing timeouts; this context exists
+// only so that everything it owns still dies at shutdown.
+func (s *Server) peerContext() context.Context {
+	return s.hub.base()
+}
+
+// handlePairStart begins pairing with a discovered device.
+//
+// Everything answerable locally is answered locally, with a specific code. The
+// alternative - handing any device id straight to the peer layer - turns a
+// typo into a ten-second dial timeout, and a stale UI row into an error the
+// user cannot act on.
+func (s *Server) handlePairStart(c *client, reqID string, msg protocol.PairStartMessage) {
+	if err := msg.Validate(); err != nil {
+		c.enqueue(protocol.NewError(reqID, protocol.ErrCodeInvalidRequest, err.Error()))
+		return
+	}
+	if msg.DeviceID == s.cfg.DeviceID {
+		c.enqueue(protocol.NewError(reqID, protocol.ErrCodeInvalidRequest,
+			"cannot pair a device with itself"))
+		return
+	}
+
+	dev, ok := s.device(msg.DeviceID)
+	if !ok {
+		c.enqueue(protocol.NewError(reqID, protocol.ErrCodeUnknownDevice,
+			"no device with that id has been discovered"))
+		return
+	}
+	if dev.Status == protocol.StatusOffline || dev.Address == "" || dev.Port == 0 {
+		c.enqueue(protocol.NewError(reqID, protocol.ErrCodeDeviceOffline,
+			"device has not been seen recently enough to dial"))
+		return
+	}
+	if s.trust != nil && s.trust.IsPaired(msg.DeviceID) {
+		c.enqueue(protocol.NewError(reqID, protocol.ErrCodeAlreadyPaired,
+			"device is already paired; forget it first to pair again"))
+		return
+	}
+	if s.peers == nil {
+		c.enqueue(protocol.NewError(reqID, protocol.ErrCodeInternal, "peer layer is not running"))
+		return
+	}
+
+	s.log.Info("pairing requested", "deviceId", dev.ID, "name", dev.Name, "address", dev.Address, "port", dev.Port)
+	if err := s.peers.StartPairing(s.peerContext(), dev); err != nil {
+		code, detail := peerErrorCode(err, protocol.ErrCodePairFailed)
+		s.log.Warn("pair:start failed", "deviceId", dev.ID, "error", err)
+		c.enqueue(protocol.NewError(reqID, code, detail))
+		return
+	}
+	// Progress is not a reply: it arrives as pair:code, peer:state and finally
+	// pair:result pushes, which every client sees.
+}
+
+// handlePairConfirm delivers the human decision into a pairing already in
+// flight, in either direction.
+func (s *Server) handlePairConfirm(c *client, reqID string, msg protocol.PairConfirmMessage) {
+	if err := msg.Validate(); err != nil {
+		c.enqueue(protocol.NewError(reqID, protocol.ErrCodeInvalidRequest, err.Error()))
+		return
+	}
+	if s.peers == nil {
+		c.enqueue(protocol.NewError(reqID, protocol.ErrCodeInternal, "peer layer is not running"))
+		return
+	}
+
+	decision := peer.PairDecision{DeviceID: msg.DeviceID, Accept: msg.Accept}
+	if !msg.Accept {
+		decision.Reason = protocol.PairReasonDeclined
+	}
+
+	if err := s.peers.Confirm(decision); err != nil {
+		// A confirm with nothing waiting is the interesting case: the pairing
+		// timed out, or the peer hung up, and the user is clicking a button
+		// that is no longer connected to anything. Say so rather than pretend
+		// it worked.
+		code, detail := peerErrorCode(err, protocol.ErrCodePairFailed)
+		s.log.Warn("pair:confirm failed", "deviceId", msg.DeviceID, "accept", msg.Accept, "error", err)
+		c.enqueue(protocol.NewError(reqID, code, detail))
+		return
+	}
+	s.log.Info("pairing decision delivered", "deviceId", msg.DeviceID, "accept", msg.Accept)
+}
+
+// handlePairForget revokes trust in a device and drops any live socket to it.
+func (s *Server) handlePairForget(c *client, reqID string, msg protocol.PairForgetMessage) {
+	if err := msg.Validate(); err != nil {
+		c.enqueue(protocol.NewError(reqID, protocol.ErrCodeInvalidRequest, err.Error()))
+		return
+	}
+
+	if s.peers != nil {
+		if err := s.peers.Forget(msg.DeviceID); err != nil {
+			code, detail := peerErrorCode(err, protocol.ErrCodeInternal)
+			s.log.Warn("pair:forget failed", "deviceId", msg.DeviceID, "error", err)
+			c.enqueue(protocol.NewError(reqID, code, detail))
+			return
+		}
+	} else if s.trust != nil {
+		// No peer layer (tests, or a degraded start): the trust store is still
+		// the source of truth for what is paired, so honour the revocation.
+		if _, err := s.trust.Remove(msg.DeviceID); err != nil {
+			s.log.Error("forget device", "deviceId", msg.DeviceID, "error", err)
+			c.enqueue(protocol.NewError(reqID, protocol.ErrCodeInternal, "could not update the trust store"))
+			return
+		}
+	}
+
+	s.log.Info("device forgotten", "deviceId", msg.DeviceID)
+	// The paired flag just changed for everyone, so push rather than debounce.
+	s.BroadcastDevices()
+}
+
+// relaySignal hands one SDP or ICE item to the peer layer, addressed by "to".
+//
+// Every failure is reported back with a code. A silently dropped signal is the
+// worst possible outcome here: WebRTC simply never connects, with no error
+// anywhere, and the user is left staring at a spinner.
+func (s *Server) relaySignal(c *client, reqID, to string, frame protocol.PeerSignalMessage) {
+	if to == s.cfg.DeviceID {
+		c.enqueue(protocol.NewError(reqID, protocol.ErrCodeInvalidRequest,
+			"cannot signal this device to itself"))
+		return
+	}
+	if !s.knownDevice(to) {
+		c.enqueue(protocol.NewError(reqID, protocol.ErrCodeUnknownDevice,
+			"no discovered or paired device with that id"))
+		return
+	}
+	if s.peers == nil {
+		c.enqueue(protocol.NewError(reqID, protocol.ErrCodeInternal, "peer layer is not running"))
+		return
+	}
+
+	if err := s.peers.SendSignal(s.peerContext(), to, frame); err != nil {
+		code, detail := peerErrorCode(err, protocol.ErrCodePeerUnreachable)
+		s.log.Warn("signal relay failed", "to", to, "kind", frame.Kind, "error", err)
+		c.enqueue(protocol.NewError(reqID, code, detail))
+		return
+	}
+	s.log.Debug("signal relayed", "to", to, "kind", frame.Kind)
+}
+
+// peerErrorCode maps a peer-layer error onto a protocol error code the
+// extension can branch on, falling back to fallbackCode for anything unknown.
+func peerErrorCode(err error, fallbackCode string) (code, message string) {
+	switch {
+	case errors.Is(err, peer.ErrNotPaired):
+		return protocol.ErrCodeNotPaired, "device is not paired"
+	case errors.Is(err, peer.ErrPeerUnreachable):
+		return protocol.ErrCodePeerUnreachable, "could not reach the device"
+	case errors.Is(err, peer.ErrNoPendingPairing):
+		return protocol.ErrCodeInvalidRequest, "no pairing is waiting for a decision on that device"
+	case errors.Is(err, peer.ErrPairTimeout):
+		return protocol.ErrCodePairFailed, "pairing timed out"
+	case errors.Is(err, protocol.ErrInvalidMessage):
+		return protocol.ErrCodeInvalidRequest, err.Error()
+	default:
+		return fallbackCode, err.Error()
+	}
+}
+
+// -----------------------------------------------------------------------------
+// Peer layer -> control plane: what arrived from the LAN
+//
+// *Server implements peer.Handler, so the peer layer never needs to know a
+// WebSocket exists; it just reports facts and they turn into pushes.
+// -----------------------------------------------------------------------------
+
+var _ peer.Handler = (*Server)(nil)
+
+// OnPairCode puts the six digits in front of the human on every connected UI.
+func (s *Server) OnPairCode(deviceID, name, code, direction string) {
+	s.log.Info("pairing code ready", "deviceId", deviceID, "name", name, "direction", direction)
+	s.Broadcast(protocol.NewPairCode(deviceID, code, direction, name))
+}
+
+// OnPairResult reports the outcome of a pairing attempt exactly once.
+func (s *Server) OnPairResult(deviceID string, paired bool, reason string) {
+	s.log.Info("pairing finished", "deviceId", deviceID, "paired", paired, "reason", reason)
+	s.Broadcast(protocol.NewPairResult(deviceID, paired, reason))
+	// The paired flag on that device just changed, so the roster is stale.
+	s.BroadcastDevices()
+}
+
+// OnPeerState reports a peer lifecycle transition.
+func (s *Server) OnPeerState(deviceID, state, message string) {
+	s.log.Debug("peer state", "deviceId", deviceID, "state", state, "message", message)
+	s.Broadcast(protocol.NewPeerState(deviceID, state, message))
+}
+
+// OnSignal converts an inbound peer:signal into the control-plane push the
+// extension expects, carrying "from" instead of "to".
+func (s *Server) OnSignal(msg protocol.PeerSignalMessage) {
+	if p, ok := msg.ToOfferPush(); ok {
+		s.Broadcast(p)
+		return
+	}
+	if p, ok := msg.ToAnswerPush(); ok {
+		s.Broadcast(p)
+		return
+	}
+	if p, ok := msg.ToICEPush(); ok {
+		s.Broadcast(p)
+		return
+	}
+	// Unroutable: an unknown kind, or a kind missing its payload. Dropping it
+	// is right, but it must not be silent.
+	s.log.Warn("dropping unroutable peer signal", "from", msg.From, "kind", msg.Kind)
 }
 
 // writeLoop is the only goroutine that writes to the connection. It also owns

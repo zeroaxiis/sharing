@@ -24,7 +24,7 @@ const Version = "0.1.0"
 
 // AppDir is the per-user configuration directory name, created inside
 // os.UserConfigDir().
-const AppDir = "nearby-share"
+const AppDir = "sharing"
 
 // FileName is the config file name inside AppDir.
 const FileName = "config.json"
@@ -226,7 +226,7 @@ func defaultName(logger *slog.Logger) string {
 	host, err := os.Hostname()
 	if err != nil || host == "" {
 		logger.Warn("hostname unavailable, falling back to a generic device name", "error", err)
-		return "Nearby Share Device"
+		return "Sharing Device"
 	}
 	return host
 }

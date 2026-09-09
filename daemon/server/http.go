@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/zeroaxiis/sharing/daemon/config"
+	"github.com/zeroaxiis/sharing/daemon/peer"
 	"github.com/zeroaxiis/sharing/daemon/protocol"
 )
 
@@ -43,6 +44,24 @@ const (
 	safariExtensionScheme  = "safari-web-extension://"
 )
 
+// PeerRouter is the slice of the peer layer the control plane drives: the four
+// things an extension can ask the daemon to do to another machine.
+//
+// It is declared here, rather than taking a *peer.Manager, so the control plane
+// can be tested without a LAN listener - and so the dependency stays one way.
+// server imports peer; peer never imports server, it calls back through
+// peer.Handler, which *Server implements.
+type PeerRouter interface {
+	// StartPairing dials a discovered device and begins the pairing exchange.
+	StartPairing(ctx context.Context, dev protocol.Device) error
+	// Confirm delivers a human decision into a pairing already in flight.
+	Confirm(d peer.PairDecision) error
+	// Forget revokes trust in a device and drops any live socket to it.
+	Forget(deviceID string) error
+	// SendSignal relays one SDP or ICE item to a paired device.
+	SendSignal(ctx context.Context, deviceID string, msg protocol.PeerSignalMessage) error
+}
+
 // Options configures a Server.
 type Options struct {
 	// Config is the resolved device identity. Required.
@@ -51,19 +70,36 @@ type Options struct {
 	Port int
 	// Logger receives structured logs. Nil uses slog.Default.
 	Logger *slog.Logger
+	// Trust is the paired-device store. Required: every device pushed to a
+	// client carries a paired flag read from it, and pair:forget writes to it.
+	Trust *config.TrustStore
+	// Peers is the LAN peer layer. Nil disables every peer-facing message,
+	// which is what the control-plane tests want; a real daemon always sets it.
+	Peers PeerRouter
 }
 
-// Server owns the HTTP listener, the routing table and the WebSocket hub.
+// Server owns the HTTP listener, the routing table, the WebSocket hub and the
+// device roster.
 type Server struct {
 	cfg     *config.Config
 	log     *slog.Logger
 	port    int
 	http    *http.Server
 	hub     *hub
+	trust   *config.TrustStore
+	peers   PeerRouter
 	started time.Time
 
 	mu sync.Mutex
 	ln net.Listener
+
+	// devMu guards the whole roster, including the debounce timer. See
+	// devices.go; it is deliberately separate from mu so a device update can
+	// never contend with a listener operation.
+	devMu     sync.Mutex
+	devByID   map[string]protocol.Device
+	devTimer  *time.Timer
+	devWindow time.Time
 }
 
 // New builds a Server. It does not bind a socket; call Run for that.
@@ -83,11 +119,18 @@ func New(opts Options) (*Server, error) {
 		return nil, fmt.Errorf("server: port %d out of range", port)
 	}
 
+	if opts.Trust == nil {
+		return nil, errors.New("server: Options.Trust is required")
+	}
+
 	s := &Server{
 		cfg:     opts.Config,
 		log:     logger,
 		port:    port,
 		hub:     newHub(logger),
+		trust:   opts.Trust,
+		peers:   opts.Peers,
+		devByID: make(map[string]protocol.Device),
 		started: time.Now(),
 	}
 
@@ -157,6 +200,10 @@ func (s *Server) Run(ctx context.Context) error {
 	defer cancelWS()
 	s.hub.setBaseContext(wsCtx)
 
+	// Age devices out even while mDNS is silent: a laptop that closes its lid
+	// sends no goodbye packet, so nothing but the clock will notice it left.
+	go s.runDeviceSweeper(wsCtx)
+
 	serveErr := make(chan error, 1)
 	go func() {
 		if err := s.http.Serve(ln); err != nil && !errors.Is(err, http.ErrServerClosed) {
@@ -174,6 +221,7 @@ func (s *Server) Run(ctx context.Context) error {
 
 	s.log.Info("shutting down http server")
 	cancelWS()
+	s.stopDeviceTimer()
 	s.hub.closeAll()
 
 	shutdownCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
