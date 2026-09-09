@@ -193,6 +193,14 @@ export class PeerLink {
   private readonly polite: boolean;
 
   private closed = false;
+  /**
+   * True once the close event has been fanned out.
+   *
+   * The event has to fire on a REMOTE teardown as well as a local close(), but
+   * exactly once: a remote close is usually followed by our own close(), and a
+   * consumer that heard it twice would settle the same transfer twice.
+   */
+  private closeEmitted = false;
   private bufferedLowThreshold = 0;
 
   private readonly stateEvents = new Emitter<PeerLinkState>();
@@ -542,7 +550,7 @@ export class PeerLink {
     }
 
     this.setState('closed');
-    this.closeEvents.emit(undefined);
+    this.emitClosed();
 
     // Drop subscriptions last, so the close event above still reaches everyone.
     this.stateEvents.clear();
@@ -610,6 +618,12 @@ export class PeerLink {
 
     channel.onclose = () => {
       this.syncState();
+      // A channel that has closed can never carry another byte, and nothing
+      // else will ever tell the consumer. TransferEngine parks its send loop on
+      // `bufferedamountlow` and arms an onClose() escape hatch precisely for
+      // this case; without this emit that escape hatch never fires and a
+      // transfer interrupted by the peer disappearing hangs forever.
+      this.emitClosed();
     };
 
     channel.onerror = (event: Event) => {
@@ -677,12 +691,20 @@ export class PeerLink {
         return;
       case 'failed':
         this.setState('failed');
+        // Terminal: WebRTC never recovers from `failed` without an ICE restart,
+        // which this link does not attempt. Treat it as a close so anything
+        // waiting on the data path is released instead of hanging.
+        this.emitClosed();
         return;
       case 'disconnected':
+        // NOT terminal, and deliberately not a close: `disconnected` routinely
+        // recovers on its own, and tearing a transfer down on a transient blip
+        // would be worse than the wait.
         this.setState('disconnected');
         return;
       case 'closed':
         this.setState('closed');
+        this.emitClosed();
         return;
       default:
         this.setState('connecting');
@@ -750,6 +772,17 @@ export class PeerLink {
     if (this.state === next) return;
     this.state = next;
     this.stateEvents.emit(next);
+  }
+
+  /**
+   * Fans out the close event at most once, from whichever end tore the link
+   * down: our own close(), the channel's `close` event, or the peer connection
+   * reaching a terminal state.
+   */
+  private emitClosed(): void {
+    if (this.closeEmitted) return;
+    this.closeEmitted = true;
+    this.closeEvents.emit(undefined);
   }
 }
 

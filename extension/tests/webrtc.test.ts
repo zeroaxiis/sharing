@@ -247,6 +247,53 @@ test('connected requires both the transport and the channel', async () => {
   link.close();
 });
 
+test('a channel closed by the peer emits the close event', async () => {
+  const { link, pc } = rig('aaa', 'zzz');
+  let closes = 0;
+  link.onClose(() => {
+    closes += 1;
+  });
+
+  await link.connect();
+  const channel = pc.channels[0];
+  assert(channel !== undefined, 'the initiator must have created a channel');
+  channel.open();
+  pc.setConnectionState('connected');
+  assertEqual(link.isOpen, true, 'the link should be usable first');
+
+  channel.remoteClose();
+
+  // Without this, TransferEngine's send loop stays parked on backpressure with
+  // no drain event coming, and the transfer never settles.
+  assertEqual(closes, 1, 'a remote close must reach onClose listeners');
+  assertEqual(link.isOpen, false, 'a closed channel is not open');
+
+  link.close();
+  assertEqual(closes, 1, 'a follow-up local close must not fire it twice');
+});
+
+test('a peer connection reaching failed emits close, disconnected does not', async () => {
+  const { link, pc } = rig('aaa', 'zzz');
+  let closes = 0;
+  link.onClose(() => {
+    closes += 1;
+  });
+
+  await link.connect();
+  pc.channels[0]?.open();
+  pc.setConnectionState('connected');
+
+  pc.setConnectionState('disconnected');
+  assertEqual(closes, 0, 'disconnected may still recover, so it is not a close');
+
+  pc.setConnectionState('failed');
+  assertEqual(closes, 1, 'failed is terminal and must release anything waiting');
+  assertEqual(link.getState(), 'failed', 'state after a failed connection');
+
+  link.close();
+  assertEqual(closes, 1, 'close after a failure must not fire it twice');
+});
+
 test('close() is idempotent and emits exactly one close event', async () => {
   const { link, pc } = rig('aaa', 'zzz');
   let closes = 0;

@@ -160,6 +160,16 @@ export class FakeDataChannel {
     this.readyState = 'open';
     this.onopen?.();
   }
+
+  /**
+   * The peer (or the transport) closing the channel on us. Distinct from
+   * close(), which is the local end asking: only this path fires `onclose`,
+   * and it is the path a mid-transfer disconnect actually takes.
+   */
+  remoteClose(): void {
+    this.readyState = 'closed';
+    this.onclose?.();
+  }
 }
 
 /**
