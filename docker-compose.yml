@@ -1,10 +1,10 @@
 # ---------------------------------------------------------------------------
-# Nearby Share — PLACEHOLDER for the future signaling service (Milestone 15)
+# Sharing — PLACEHOLDER for the future signaling service (Milestone 15)
 # ---------------------------------------------------------------------------
 #
 # NOTHING HERE IS BUILT AND NOTHING HERE IS NEEDED.
 #
-# Nearby Share transfers over the LAN. Discovery is mDNS, signaling is relayed
+# Sharing transfers over the LAN. Discovery is mDNS, signaling is relayed
 # between the two local `share-daemon` processes, and the payload moves
 # browser-to-browser over a WebRTC DataChannel. No server is involved and none
 # is required. Do not run `docker compose up` expecting this to do something —
@@ -25,14 +25,14 @@
 #   signaling:
 #     # Not implemented. There is no ./signaling source to build yet.
 #     build: ./signaling
-#     container_name: nearby-share-signaling
+#     container_name: sharing-signaling
 #     restart: unless-stopped
 #     ports:
 #       - "8080:8080"          # WebSocket relay endpoint
 #     environment:
-#       - NEARBY_SIGNALING_ADDR=:8080
-#       - NEARBY_PROTOCOL_VERSION=1
-#       - NEARBY_LOG_LEVEL=info
+#       - SHARING_SIGNALING_ADDR=:8080
+#       - SHARING_PROTOCOL_VERSION=1
+#       - SHARING_LOG_LEVEL=info
 #       # Rooms are ephemeral and in-memory. No database, no volumes,
 #       # no persistence — a restart forgets everything by design.
 #     healthcheck:

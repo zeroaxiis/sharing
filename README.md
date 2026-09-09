@@ -1,4 +1,4 @@
-# Nearby Share
+# Sharing
 
 AirDrop for the browser — send text, images and files to devices on your LAN from a browser
 extension, routed peer-to-peer by a tiny local Go daemon. No cloud, no account, no upload.
@@ -24,7 +24,7 @@ extension, routed peer-to-peer by a tiny local Go daemon. No cloud, no account, 
   |  share-daemon  (Go, binds 127.0.0.1:8765)                  |
   |                                                            |
   |   HTTP API  |  WebSocket hub  |  device identity/config    |
-  |   mDNS advertise + browse  (_nearby-share._tcp . local.)   |
+  |   mDNS advertise + browse  (_sharing._tcp . local.)   |
   |   WebRTC signaling relay (offer / answer / ICE)            |
   +-------------------------------|---------------------------+
                                   |
@@ -50,7 +50,7 @@ arbitrary network interfaces. See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)
 
 ## Features
 
-- Local-network device discovery over mDNS (`_nearby-share._tcp`) — **planned, M4**
+- Local-network device discovery over mDNS (`_sharing._tcp`) — **planned, M4**
 - Peer-to-peer transfer over a WebRTC DataChannel — **planned, M7**
 - Send text / links, then images, files and video — **planned, M9+**
 - Cross-browser: Chrome, Brave and Firefox from one WXT codebase
@@ -167,7 +167,7 @@ sharing/
   optional).
 - **Device trust.** Each device has a persisted RFC 4122 v4 UUID. Pairing (M6) uses a 6-digit code
   confirmed on both ends; unpaired devices cannot open a transfer.
-- **Local identity file.** `os.UserConfigDir()/nearby-share/config.json`, mode `0600`, dir `0700`.
+- **Local identity file.** `os.UserConfigDir()/sharing/config.json`, mode `0600`, dir `0700`.
 
 ---
 

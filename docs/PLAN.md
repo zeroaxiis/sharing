@@ -1,4 +1,4 @@
-# Nearby Share — Project Plan
+# Sharing — Project Plan
 
 Roadmap, milestones, schedules and matrices. The wire contract lives in
 [`../shared/PROTOCOL.md`](../shared/PROTOCOL.md) and is authoritative; nothing here overrides it.
@@ -39,7 +39,7 @@ Chrome and Firefox; the popup renders; `shared/PROTOCOL.md` exists and the TS ty
 `{"status":"ok","uptimeSeconds":N}`, unknown routes 404 as JSON, `OPTIONS` returns 204. CORS + Private
 Network Access headers on every response with the origin allowlist. `/ws` upgrades and answers
 `hello` -> `ready` and `ping` -> `pong`, with `error` for anything else. Device identity is a v4 UUID
-persisted to `os.UserConfigDir()/nearby-share/config.json` (0600 / dir 0700).
+persisted to `os.UserConfigDir()/sharing/config.json` (0600 / dir 0700).
 
 *Done when:* `curl http://127.0.0.1:8765/info` returns valid `DaemonInfo`; a `wscat`/browser socket to
 `/ws` completes the hello/ready and ping/pong exchanges; restarting the daemon returns the same
@@ -58,12 +58,12 @@ this survives an MV3 service-worker termination.
 
 ### M4 — mDNS advertise + browse  **[PENDING]**
 
-`github.com/libp2p/zeroconf/v2`. Advertise `_nearby-share._tcp` in `local.` with TXT keys `id`, `name`,
+`github.com/libp2p/zeroconf/v2`. Advertise `_sharing._tcp` in `local.` with TXT keys `id`, `name`,
 `ver`, `proto`. Browse continuously, maintain an in-memory peer table with `lastSeen`, expire stale
 entries, and ignore our own advertisement by `deviceId`.
 
-*Done when:* two daemons on the same LAN each list the other within ~3s; `dns-sd -B _nearby-share._tcp`
-(macOS) / `avahi-browse -r _nearby-share._tcp` (Linux) shows the service; a killed daemon disappears
+*Done when:* two daemons on the same LAN each list the other within ~3s; `dns-sd -B _sharing._tcp`
+(macOS) / `avahi-browse -r _sharing._tcp` (Linux) shows the service; a killed daemon disappears
 from the peer table inside the expiry window.
 
 ### M5 — Device list to the extension  **[PENDING]**
@@ -198,7 +198,7 @@ Per-OS gotchas to verify explicitly:
   world-readable.
 - **macOS 14+:** the *Local Network* privacy permission must be granted or mDNS silently sees nothing;
   Gatekeeper requires the binary to be signed and notarized for a non-terminal launch.
-- **Linux:** Avahi must be running for `_nearby-share._tcp` to resolve; `ufw`/`firewalld` must allow
+- **Linux:** Avahi must be running for `_sharing._tcp` to resolve; `ufw`/`firewalld` must allow
   UDP 5353; `XDG_CONFIG_HOME` falls back to `~/.config`.
 
 ---

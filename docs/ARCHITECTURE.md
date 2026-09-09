@@ -1,4 +1,4 @@
-# Nearby Share — Architecture
+# Sharing — Architecture
 
 Design rationale and the connection lifecycle. The wire format itself is specified in
 [`../shared/PROTOCOL.md`](../shared/PROTOCOL.md), which is authoritative; this document explains *why*
@@ -70,7 +70,7 @@ every byte of the payload in the browser, and let them talk over loopback.
 |  HTTP     /info  /health  404-as-JSON  OPTIONS  CORS+PNA       |
 |  WS       /ws  hello->ready, ping->pong, error                 |
 |  config   v4 UUID + name, persisted 0600 in the user config dir|
-|  mDNS     advertise + browse _nearby-share._tcp   (M4)         |
+|  mDNS     advertise + browse _sharing._tcp   (M4)         |
 |  peers    in-memory table with lastSeen + expiry   (M4/M5)     |
 |  trust    paired device store                      (M6)        |
 |  signal   relays offer/answer/ICE between daemons  (M7)        |
@@ -121,8 +121,8 @@ From cold start to bytes moving:
   1. daemon starts
      load-or-create config.json  (v4 UUID + name, 0600)
      bind 127.0.0.1:8765
-     advertise _nearby-share._tcp   ---- mDNS ---->             (B sees A)
-     browse  _nearby-share._tcp     <--- mDNS -----             (A sees B)
+     advertise _sharing._tcp   ---- mDNS ---->             (B sees A)
+     browse  _sharing._tcp     <--- mDNS -----             (A sees B)
 
   2. extension background wakes
      GET http://127.0.0.1:8765/info   -> DaemonInfo
@@ -180,7 +180,7 @@ surface a clear "update one side" message rather than reconnect-loop forever.
 
 ## 4. Connectivity ladder: LAN -> STUN -> TURN
 
-WebRTC gathers candidates in tiers. Nearby Share is built so the first tier almost always wins, and so
+WebRTC gathers candidates in tiers. Sharing is built so the first tier almost always wins, and so
 that the last tier is optional and off by default.
 
 ```
@@ -219,7 +219,7 @@ that the last tier is optional and off by default.
               A <====> [ TURN relay ] <====> B
                      encrypted, relayed
 
-    Nearby Share ships with NO TURN server configured. If a hosted
+    Sharing ships with NO TURN server configured. If a hosted
     relay is ever added it is the M15 signaling service, it is
     opt-in, and it relays offer/answer/ICE -- see ../signaling/.
 ```

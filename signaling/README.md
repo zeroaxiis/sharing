@@ -4,9 +4,9 @@
 
 ## You do not need this
 
-Nearby Share works on a LAN with no server at all:
+Sharing works on a LAN with no server at all:
 
-- devices find each other with **mDNS** (`_nearby-share._tcp` in `local.`),
+- devices find each other with **mDNS** (`_sharing._tcp` in `local.`),
 - the two local `share-daemon` processes relay the WebRTC offer/answer/ICE between themselves,
 - the payload travels **browser to browser** over a WebRTC DataChannel.
 
